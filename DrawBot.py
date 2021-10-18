@@ -15,6 +15,7 @@ import os
 import random
 from tkinter import filedialog
 from PixelData import *
+from math import sqrt
 #drawingArea = (10,10)
 corner1 = (2998, 304)
 corner2 = (3707, 683)
@@ -24,7 +25,10 @@ fileName = str()
 def LoadColorPositions():
     try:
         lineNumber = 0
+        
         file = open("positions.txt", "r")
+        
+
         fileLines = file.readlines()
         for color in allColors:
             color.x = int(fileLines[lineNumber].split("\n")[0])
@@ -36,11 +40,11 @@ def LoadColorPositions():
                 text=f"Position load failed :( (Have you saved positions yet?)")
         else:
             statusLabel.config(text=f"Position load successful :)")
+        file.close()
 
     except Exception as e:
-        statusLabel.config(text=f"Position load failed :({e}")
-    finally:
-        file.close()
+        statusLabel.config(text=f"Position load failed :(Have you saved positions yet?{e}")
+
 
 
 def DotPlace():
@@ -200,16 +204,17 @@ def SetDrawingBoundary():
     y = abs(corner1[0]-corner2[1])
     drawingArea = (x, y)
     print(drawingArea)
-    statusLabel.config(text="Set drawing area")
+    statusLabel.config(text="Drawing Area Set")
 
 
 def FindClosestRGB(rgb: tuple):
     values = list()
     for color in allColors:
         number = 0
-        number += abs(rgb[0]-color.RGB[0])
-        number += abs(rgb[1]-color.RGB[1])
-        number += abs(rgb[2]-color.RGB[2])
+        red = pow(rgb[0] - color.RGB[0],2)
+        green = pow(rgb[1] - color.RGB[1],2)
+        blue = pow(rgb[2] - color.RGB[2],2)
+        number = sqrt(red+green+blue)
         values.append(number)
 
     index_min = min(range(len(values)), key=values.__getitem__)
