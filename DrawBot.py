@@ -20,7 +20,7 @@ from math import sqrt
 corner1 = (2998, 304)
 corner2 = (3707, 683)
 fileName = str()
-
+stopDrawing = False
 
 def LoadColorPositions():
     try:
@@ -48,6 +48,8 @@ def LoadColorPositions():
 
 
 def DotPlace():
+    global stopDrawing
+    stopDrawing = False
     img = 0
     detailLevel = 10-int(detailLevelEntry.get())+1
     pixelCount = 200
@@ -75,6 +77,8 @@ def DotPlace():
     lastColor = "Name"
     for x in range(int(xSize)):
         for y in range(int(ySize)):
+            if(stopDrawing):
+                    return
             if(pix[x, y][3] == 0):
                 continue
             colorIndex = FindClosestRGB(pix[x, y])
@@ -100,6 +104,8 @@ def DotPlace():
 
 
 def LinePlace():
+    global stopDrawing
+    stopDrawing = False
     img = 0
     detailLevel = 10-int(detailLevelEntry.get())+1
     pixelCount = 200
@@ -128,6 +134,8 @@ def LinePlace():
     allPixelData = []
     for x in range(int(xSize)):
         for y in range(int(ySize)):
+            if(stopDrawing):
+                return
             if(pix[x, y][3] == 0):
                 continue
             color = FindClosestRGB(pix[x, y])
@@ -159,7 +167,6 @@ def LinePlace():
             if(i.x != currentX):
 
                 allPixelData = remove_values_from_list(allPixelData, currentX)
-
                 currentX += 1
                 break
 
@@ -176,7 +183,8 @@ def LinePlace():
 
                 continue
             if(thisX[i].color.name != startData.color.name) or i == len(thisX)-1:
-
+                if(stopDrawing):
+                    return
                 DrawFromTo((startData.x, startData.y),
                            (thisX[i-1].x, thisX[i-1].y), startData.color)
                 startData = thisX[i]
@@ -211,6 +219,10 @@ def FindClosestRGB(rgb: tuple):
     values = list()
     for color in allColors:
         number = 0
+        number += abs(rgb[0]-color.RGB[0])
+        number += abs(rgb[1]-color.RGB[1])
+        number += abs(rgb[2]-color.RGB[2])
+        
         red = pow(rgb[0] - color.RGB[0],2)
         green = pow(rgb[1] - color.RGB[1],2)
         blue = pow(rgb[2] - color.RGB[2],2)
@@ -218,7 +230,7 @@ def FindClosestRGB(rgb: tuple):
         values.append(number)
 
     index_min = min(range(len(values)), key=values.__getitem__)
-    print(allColors[index_min].name)
+    #print(allColors[index_min].name)
     return index_min
 
 
@@ -239,8 +251,10 @@ def OpenFile():
 
 
 def Exit():
+    global stopDrawing
+    stopDrawing = True
     print("Exiting")
-    os._exit(0)
+    #os._exit(0)
 
 
 root = tk.Tk()
