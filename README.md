@@ -5,7 +5,7 @@ If at any time the program won't start clicking or clicks randomly just press es
 
 
 For a video demostrating how to run the program goto https://www.youtube.com/watch?v=gfKDNLLBOIs.
-
+(Thanks to ToastCart for his feedback!)
 Instructions:
 Run GetColorPositions.exe and click set color positions. Click the black color, then the gray color, the the white color (below the black). Click test color positions and see if all the colors match up. If they don't, then try again. Finally, click save color positions.
 
