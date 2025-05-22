@@ -54,7 +54,7 @@ def DotPlace():
     xAddAmount = drawingArea[0] / pixelCount * detailLevel
     yAddAmount = drawingArea[1] / pixelCount * detailLevel
 
-    print(int(drawingArea[0] * drawingArea[1] / 5))
+    #print(int(drawingArea[0] * drawingArea[1] / 5))
 
     if (imageMode.get() == 1 or imageMode.get() == 0):
         response = requests.get(urlInput.get())
@@ -76,23 +76,19 @@ def DotPlace():
 
     for x in range(int(xSize)):
         for y in range(int(ySize)):
-            if (stopDrawing):
+            if (stopDrawing): # if esc is pushed, quit drawing
                 return
-            
-            if (pix[x, y][3] == 0):
+
+            colorIndex = FindClosestRGB(pix[x, y]) # Get color of pixel
+
+            if (pix[x, y][3] == 0 or allColors[colorIndex].name == "White"): # if pixel is transparent or white, skip
                 continue
 
-            colorIndex = FindClosestRGB(pix[x, y])
-
-            if (allColors[colorIndex].name == "White"):
-                continue
-
-            colorPosition = (allColors[colorIndex].x, allColors[colorIndex].y)
-            if (random.randint(1, 5) == 1 or slowMode.get() is True):
-                time.sleep(0.0000000001)
+            time.sleep(0.001) # Pause before drawing again
 
             if (allColors[colorIndex].name != lastColor):
-                mouse.move(colorPosition[0], colorPosition[1], duration=0)
+                # This could cause issues if scaling isn't 100%
+                mouse.move(allColors[colorIndex].x, allColors[colorIndex].y, duration=0)
                 mouse.click(LEFT)
 
             # mouse.move(corner1[0]+x*detailLevel,corner1[1]+y*detailLevel,duration=0)
@@ -161,7 +157,7 @@ def LinePlace():
                    corner1[1] + yAddAmount * start[1])
         mouse.hold()
         mouse.move(corner1[0] + xAddAmount * end[0], corner1[1] + yAddAmount * end[1])
-        time.sleep(0.000001)
+        time.sleep(0.001) # Pause before drawing again
         mouse.release()
 
     def remove_values_from_list(the_list, val):
@@ -215,7 +211,7 @@ def SetDrawingBoundary():
     x = abs(corner1[0] - corner2[0])
     y = abs(corner1[0] - corner2[1])
     drawingArea = (x, y)
-    print(drawingArea)
+    print("Drawing Area:", drawingArea)
     statusLabel.config(text="Drawing Area Set")
 
 def FindClosestRGB(rgb: tuple):
@@ -257,8 +253,10 @@ def Exit():
     print("Exiting")
     #os._exit(0)
 
+# GUI
 root = tk.Tk()
-slowMode = tk.BooleanVar()
+#slowMode = tk.BooleanVar()
+slowMode = True
 imageMode = tk.IntVar()
 drawMode = tk.IntVar()
 root.geometry("800x600")
@@ -302,8 +300,8 @@ tk.Label(root, text="Detail Level 1-10").pack()
 
 detailLevelEntry.insert(0, "9")
 detailLevelEntry.pack()
-slowModeCheck = tk.Checkbutton(text="Slow Mode", variable=slowMode)
-slowModeCheck.pack()
+#slowModeCheck = tk.Checkbutton(text="Slow Mode", variable=slowMode)
+#slowModeCheck.pack()
 statusLabel = tk.Label(text="Hello!")
 statusLabel.pack()
 LoadColorPositions()
