@@ -15,7 +15,9 @@ import random
 from tkinter import filedialog
 from PixelData import *
 from math import sqrt
+import ctypes
 
+scalingFactor = ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100 # Gets windows screen scale
 #drawingArea = (10,10)
 corner1 = (2998, 304)
 corner2 = (3707, 683)
@@ -87,8 +89,8 @@ def DotPlace():
             time.sleep(0.001) # Pause before drawing again
 
             if (allColors[colorIndex].name != lastColor):
-                # This could cause issues if scaling isn't 100%
-                mouse.move(allColors[colorIndex].x, allColors[colorIndex].y, duration=0)
+                # Account for windows screen scaling when moving
+                mouse.move(allColors[colorIndex].x / scalingFactor, allColors[colorIndex].y / scalingFactor, duration=0)
                 mouse.click(LEFT)
 
             # mouse.move(corner1[0]+x*detailLevel,corner1[1]+y*detailLevel,duration=0)
@@ -202,10 +204,10 @@ def DrawImage():
 def SetDrawingBoundary():
     global drawingArea
     global corner1, corner2
-    statusLabel.config(text="Click corner 1")
+    statusLabel.config(text="Click top left corner")
     mouse.wait(LEFT, mouse.DOWN)
     corner1 = get_position()
-    statusLabel.config(text="Click corner 2")
+    statusLabel.config(text="Click bottom right corner")
     mouse.wait(LEFT, mouse.DOWN)
     corner2 = get_position()
     x = abs(corner1[0] - corner2[0])
