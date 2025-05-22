@@ -152,7 +152,8 @@ def LinePlace():
     currentX = 0
 
     def DrawFromTo(start, end, color: Color):
-        mouse.move(color.x, color.y)
+        # Account for screen scaling factor
+        mouse.move(color.x / scalingFactor, color.y / scalingFactor)
         mouse.click()
         # mouse.drag(corner1[0]+xAddAmount*start[0],corner1[1]+yAddAmount*start[1],corner1[0]+xAddAmount*end[0],corner1[1]+yAddAmount*end[1])
         mouse.move(corner1[0] + xAddAmount * start[0],
