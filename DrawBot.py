@@ -6,6 +6,7 @@ import threading
 from Colors import *
 from PIL import Image
 from PIL import ImageEnhance
+from PIL import ImageGrab
 from io import BytesIO
 import requests
 from urllib.request import Request, urlopen
@@ -16,6 +17,7 @@ from tkinter import filedialog
 from PixelData import *
 from math import sqrt
 import ctypes
+import sys
 
 scalingFactor = ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100 # Gets windows screen scale
 #drawingArea = (10,10)
@@ -23,6 +25,10 @@ corner1 = (2998, 304)
 corner2 = (3707, 683)
 fileName = str()
 stopDrawing = False
+strokeDelay = 0.01 # Seconds to wait around pressing and releasing so the browser keeps up
+moveDelay = 0.002 # Seconds to wait between small moves inside a stroke
+maxStepSize = 8 # Longest single mouse move inside a stroke, in pixels
+minAreaSize = 6 # Areas with fewer pixels than this are merged into the color around them
 
 def LoadColorPositions():
     try:
@@ -46,161 +52,258 @@ def LoadColorPositions():
     except Exception as e:
         statusLabel.config(text=f"Position load failed :(Have you saved positions yet?{e}")
 
-def DotPlace():
-    global stopDrawing
-    stopDrawing = False
-    img = 0
-    detailLevel = 10 - int(detailLevelEntry.get()) + 1
-    pixelCount = 200
-    drawingArea = (abs(corner1[0] - corner2[0]), abs(corner1[1] - corner2[1]))
-    xAddAmount = drawingArea[0] / pixelCount * detailLevel
-    yAddAmount = drawingArea[1] / pixelCount * detailLevel
+def LoadImage():
+    if (imageMode.get() == 3):
+        clipboard = ImageGrab.grabclipboard()
 
-    #print(int(drawingArea[0] * drawingArea[1] / 5))
+        # Copying an image file in File Explorer puts its path on the clipboard instead of the picture
+        if (isinstance(clipboard, list) and clipboard):
+            clipboard = Image.open(clipboard[0])
+
+        if (not isinstance(clipboard, Image.Image)):
+            raise ValueError("No image on the clipboard. Right click an image and pick Copy image first.")
+
+        return ImageEnhance.Sharpness(clipboard.convert('RGBA')).image
 
     if (imageMode.get() == 1 or imageMode.get() == 0):
         response = requests.get(urlInput.get())
-        #response = requests.get("https://cdn.discordapp.com/attachments/374695917170851840/895139808895205487/Screenshot-2021-10-05-205602.png")
-        #img = Image.open(BytesIO(response.content))
-        img = ImageEnhance.Sharpness(Image.open(BytesIO(response.content)).convert('RGBA')).image
-    else:
-        print(fileName)
-        img = ImageEnhance.Sharpness(Image.open(fileName).convert('RGBA')).image
-        
-    #img = ImageEnhance.Sharpness (Image.open("unnamed.png").convert('RGBA')).image
-    #edges = img.filter(ImageFilter.FIND_EDGES)
-    img = img.resize( (int(pixelCount / detailLevel), int(pixelCount / detailLevel)) )
+        return ImageEnhance.Sharpness(Image.open(BytesIO(response.content)).convert('RGBA')).image
+
+    print(fileName)
+    return ImageEnhance.Sharpness(Image.open(fileName).convert('RGBA')).image
+
+def LoadColorGrid(gridSize):
+    # The image as grid[y][x] of palette colors, None where nothing should be drawn
+    img = LoadImage().resize((gridSize, gridSize))
     pix = img.load()
-    print(pix)
+    maxColors = max(1, int(maxColorsEntry.get()))
 
-    xSize, ySize = img.size
-    lastColor = "Name"
+    # Keep only the most used colors (plus the white background), and move every other pixel to the closest kept color
+    counts = {}
 
-    for x in range(int(xSize)):
-        for y in range(int(ySize)):
+    for y in range(gridSize):
+        for x in range(gridSize):
+            if (pix[x, y][3] != 0):
+                color = allColors[FindClosestRGB(pix[x, y])]
+                counts[color] = counts.get(color, 0) + 1
+
+    keptColors = [color for color in sorted(counts, key=counts.get, reverse=True) if color is not white][:maxColors] + [white]
+    print("Colors:", ", ".join(color.name for color in keptColors))
+
+    grid = [[keptColors[FindClosestRGB(pix[x, y], keptColors)] if pix[x, y][3] != 0 else white
+             for x in range(gridSize)] for y in range(gridSize)]
+
+    RemoveSpecks(grid)
+    return [[None if color is white else color for color in row] for row in grid]
+
+def Neighbors(x, y, size):
+    for nx in range(x - 1, x + 2):
+        for ny in range(y - 1, y + 2):
+            if ((nx, ny) != (x, y) and 0 <= nx < size and 0 <= ny < size):
+                yield nx, ny
+
+def RemoveSpecks(grid):
+    # Repaint areas smaller than minAreaSize with the color around them, since each area costs a stroke
+    size = len(grid)
+    seen = [[False] * size for _ in range(size)]
+
+    for y in range(size):
+        for x in range(size):
+            if (seen[y][x]):
+                continue
+
+            color = grid[y][x]
+            area = [(x, y)]
+            seen[y][x] = True
+            borderColors = {}
+
+            for ax, ay in area: # area grows while it is walked, like a flood fill
+                for nx, ny in Neighbors(ax, ay, size):
+                    if (grid[ny][nx] is color):
+                        if (not seen[ny][nx]):
+                            seen[ny][nx] = True
+                            area.append((nx, ny))
+                    else:
+                        borderColors[grid[ny][nx]] = borderColors.get(grid[ny][nx], 0) + 1
+
+            if (len(area) < minAreaSize and borderColors):
+                fill = max(borderColors, key=borderColors.get)
+
+                for ax, ay in area:
+                    grid[ay][ax] = fill
+
+def DotPlace():
+    global stopDrawing
+    stopDrawing = False
+    detailLevel = 10 - int(detailLevelEntry.get()) + 1
+    pixelCount = 200
+    gridSize = int(pixelCount / detailLevel)
+    left = min(corner1[0], corner2[0])
+    top = min(corner1[1], corner2[1])
+    xAddAmount = abs(corner1[0] - corner2[0]) / gridSize
+    yAddAmount = abs(corner1[1] - corner2[1]) / gridSize
+
+    grid = LoadColorGrid(gridSize)
+    lastColor = None
+
+    for x in range(gridSize):
+        for y in range(gridSize):
             if (stopDrawing): # if esc is pushed, quit drawing
                 return
 
-            colorIndex = FindClosestRGB(pix[x, y]) # Get color of pixel
+            color = grid[y][x]
 
-            if (pix[x, y][3] == 0 or allColors[colorIndex].name == "White"): # if pixel is transparent or white, skip
+            if (color is None):
                 continue
 
             time.sleep(0.001) # Pause before drawing again
 
-            if (allColors[colorIndex].name != lastColor):
+            if (color is not lastColor):
                 # Account for windows screen scaling when moving
-                mouse.move(allColors[colorIndex].x / scalingFactor, allColors[colorIndex].y / scalingFactor, duration=0)
+                mouse.move(color.x / scalingFactor, color.y / scalingFactor, duration=0)
                 mouse.click(LEFT)
 
-            # mouse.move(corner1[0]+x*detailLevel,corner1[1]+y*detailLevel,duration=0)
-            mouse.move(corner1[0] + xAddAmount * x, corner1[1] + y * yAddAmount, duration=0)
+            mouse.move(left + xAddAmount * x, top + y * yAddAmount, duration=0)
             mouse.click(LEFT)
-            lastColor = allColors[colorIndex].name
+            lastColor = color
 
     mouse.move(white.x, white.y)
     mouse.click(LEFT)
-    pix[0, 0] = (75, 22, 255)
 
 def LinePlace():
     global stopDrawing
     stopDrawing = False
-    img = 0
     detailLevel = 10 - int(detailLevelEntry.get()) + 1
     pixelCount = 200
-    drawingArea = (abs(corner1[0] - corner2[0]), abs(corner1[1] - corner2[1]))
-    xAddAmount = drawingArea[0] / pixelCount * detailLevel
-    yAddAmount = drawingArea[1] / pixelCount * detailLevel
+    gridSize = int(pixelCount / detailLevel)
+    left = min(corner1[0], corner2[0])
+    top = min(corner1[1], corner2[1])
+    xAddAmount = abs(corner1[0] - corner2[0]) / gridSize
+    yAddAmount = abs(corner1[1] - corner2[1]) / gridSize
 
-    if (imageMode.get() == 1 or imageMode.get() == 0):
-        response = requests.get(urlInput.get())
-        #response = requests.get("https://cdn.discordapp.com/attachments/374695917170851840/895139808895205487/Screenshot-2021-10-05-205602.png")
-        #img = Image.open(BytesIO(response.content))
-        img = ImageEnhance.Sharpness(Image.open(BytesIO(response.content)).convert('RGBA')).image
-    else:
-        print(fileName)
-        img = ImageEnhance.Sharpness(Image.open(fileName).convert('RGBA')).image
-        
-    #img = ImageEnhance.Sharpness (Image.open("unnamed.png").convert('RGBA')).image
-    #edges = img.filter(ImageFilter.FIND_EDGES)
-    img = img.resize((int(pixelCount / detailLevel), int(pixelCount / detailLevel)))
-    pix = img.load()
-    print(pix)
+    grid = LoadColorGrid(gridSize)
 
-    xSize, ySize = img.size
-    lastColor = "Name"
-    allPixelData = []
+    # Split each row into runs of the same color, grouped by color so each color is only selected once
+    runsByColor = {}
 
-    for x in range(int(xSize)):
-        for y in range(int(ySize)):
+    for y in range(gridSize):
+        runStart = 0
+        runColor = None
+
+        for x in range(gridSize + 1):
+            color = grid[y][x] if x < gridSize else None
+
+            if (color is not runColor):
+                if (runColor is not None):
+                    runsByColor.setdefault(runColor, []).append((runStart, x - 1, y))
+
+                runStart = x
+                runColor = color
+
+    strokesByColor = {color: BuildStrokes(runs) for color, runs in runsByColor.items()}
+    print("Strokes:", sum(len(strokes) for strokes in strokesByColor.values()))
+
+    for color, strokes in strokesByColor.items():
+        if (stopDrawing):
+            return
+
+        # Account for windows screen scaling when selecting the color
+        mouse.move(color.x / scalingFactor, color.y / scalingFactor)
+        mouse.click(LEFT)
+        time.sleep(strokeDelay)
+
+        for stroke in strokes:
             if (stopDrawing):
                 return
-            
-            if (pix[x, y][3] == 0):
-                continue
 
-            color = FindClosestRGB(pix[x, y])
+            points = [(left + (x + 0.5) * xAddAmount, top + (y + 0.5) * yAddAmount) for x, y in stroke]
 
-            if (allColors[color].name == "White"):
-                continue
+            # Turn a lone pixel into a short line, since Gartic drops dots when submitting
+            if (len(set(points)) == 1):
+                points.append((points[0][0] + max(2, xAddAmount / 2), points[0][1]))
 
-            allPixelData.append(PixelData(x, y, allColors[color]))
+            DrawPath(points)
 
-    length = len(allPixelData)
-    print(len(allPixelData))
+def BuildStrokes(runs):
+    # One stroke per connected area: walk every run in the area and step back over already painted runs
+    # to reach the rest, so the pen never has to lift or cross another color
+    runsByRow = {}
 
-    currentX = 0
+    for run in runs:
+        runsByRow.setdefault(run[2], []).append(run)
 
-    def DrawFromTo(start, end, color: Color):
-        # Account for screen scaling factor
-        mouse.move(color.x / scalingFactor, color.y / scalingFactor)
-        mouse.click()
-        # mouse.drag(corner1[0]+xAddAmount*start[0],corner1[1]+yAddAmount*start[1],corner1[0]+xAddAmount*end[0],corner1[1]+yAddAmount*end[1])
-        mouse.move(corner1[0] + xAddAmount * start[0],
-                   corner1[1] + yAddAmount * start[1])
-        mouse.hold()
-        mouse.move(corner1[0] + xAddAmount * end[0], corner1[1] + yAddAmount * end[1])
-        time.sleep(0.001) # Pause before drawing again
-        mouse.release()
+    visited = set()
+    strokes = []
+    sys.setrecursionlimit(max(sys.getrecursionlimit(), len(runs) + 1000))
 
-    def remove_values_from_list(the_list, val):
-        return [value for value in the_list if value.x != val]
+    for run in runs:
+        if (run in visited):
+            continue
 
-    while True:
-        thisX = []
-        for i in allPixelData:
-            if (i.x != currentX):
-                allPixelData = remove_values_from_list(allPixelData, currentX)
-                currentX += 1
-                break
+        visited.add(run)
+        path = [(run[0], run[2])]
+        lastNewPoint = [0]
+        TourRun(run, run[0], runsByRow, visited, path, lastNewPoint)
+        strokes.append(path[:lastNewPoint[0] + 1]) # the walk back after the last new run paints nothing
 
-            thisX.append(i)
+    return strokes
 
-        if (currentX == pixelCount/detailLevel - 1):
-            break
+def TourRun(run, entryX, runsByRow, visited, path, lastNewPoint):
+    # Sweep the run left to right, detouring into each unvisited touching run (diagonals included) and back,
+    # then return to entryX so the caller can carry on from where it entered
+    startX, endX, y = run
 
-        startData: PixelData = PixelData
-        for i in range(len(thisX)):
-            if (i == 0):
-                startData = thisX[i]
-                continue
+    def AddPoint(x, y, isNew):
+        path.append((x, y))
 
-            if (thisX[i].color.name != startData.color.name) or i == len(thisX) - 1:
-                if(stopDrawing):
-                    return
-                
-                DrawFromTo((startData.x, startData.y), (thisX[i - 1].x, thisX[i - 1].y), startData.color)
+        if (isNew):
+            lastNewPoint[0] = len(path) - 1
 
-                startData = thisX[i]
+    touching = [r for row in (y - 1, y + 1) for r in runsByRow.get(row, []) if r[0] <= endX + 1 and startX - 1 <= r[1]]
+    touching.sort(key=lambda r: max(r[0], startX))
+    AddPoint(startX, y, True)
 
-        if(len(allPixelData) == 0):
-            break
+    for nextRun in touching:
+        if (nextRun in visited):
+            continue
+
+        visited.add(nextRun)
+        leaveX = min(max(nextRun[0], startX), endX)
+        enterX = min(max(leaveX, nextRun[0]), nextRun[1])
+        AddPoint(leaveX, y, True)
+        AddPoint(enterX, nextRun[2], True)
+        TourRun(nextRun, enterX, runsByRow, visited, path, lastNewPoint)
+        AddPoint(leaveX, y, False)
+
+    AddPoint(endX, y, True)
+    AddPoint(entryX, y, False)
+
+def DrawPath(points):
+    mouse.move(*points[0])
+    mouse.press(LEFT)
+    time.sleep(strokeDelay)
+
+    for (fromX, fromY), (toX, toY) in zip(points, points[1:]):
+        # Move in small steps so the browser draws a straight line instead of smoothing a long jump
+        steps = max(1, int(max(abs(toX - fromX), abs(toY - fromY)) / maxStepSize))
+
+        for step in range(1, steps + 1):
+            mouse.move(fromX + (toX - fromX) * step / steps, fromY + (toY - fromY) * step / steps)
+            time.sleep(moveDelay)
+
+    time.sleep(strokeDelay)
+    mouse.release(LEFT)
+    time.sleep(strokeDelay)
 
 def DrawImage():
-    if(drawMode.get() == 0):
-        DotPlace()
-    else:
-        LinePlace()
+    try:
+        if(drawMode.get() == 0):
+            DotPlace()
+        else:
+            LinePlace()
+
+    except Exception as e:
+        statusLabel.config(text=f"Draw failed :( {e}")
 
 def SetDrawingBoundary():
     global drawingArea
@@ -217,10 +320,10 @@ def SetDrawingBoundary():
     print("Drawing Area:", drawingArea)
     statusLabel.config(text="Drawing Area Set")
 
-def FindClosestRGB(rgb: tuple):
+def FindClosestRGB(rgb: tuple, colors=allColors):
     values = list()
 
-    for color in allColors:
+    for color in colors:
         number = 0
         number += abs(rgb[0] - color.RGB[0])
         number += abs(rgb[1] - color.RGB[1])
@@ -243,6 +346,9 @@ def ChangeImageMode():
     elif(imageMode.get() == 2):
         urlInput.forget()
         localFileButton.pack()
+    elif(imageMode.get() == 3):
+        urlInput.forget()
+        localFileButton.forget()
 
 def OpenFile():
     global fileName
@@ -260,10 +366,17 @@ def Exit():
 root = tk.Tk()
 #slowMode = tk.BooleanVar()
 slowMode = True
-imageMode = tk.IntVar()
+imageMode = tk.IntVar(value=3)
 drawMode = tk.IntVar()
 root.geometry("800x600")
 root.title("Gartic Drawbot")
+
+tk.Radiobutton(root,
+               text="Clipboard",
+               padx=20,
+               variable=imageMode,
+               command=ChangeImageMode,
+               value=3).pack()
 
 tk.Radiobutton(root,
                text="URL",
@@ -303,13 +416,16 @@ tk.Label(root, text="Detail Level 1-10").pack()
 
 detailLevelEntry.insert(0, "9")
 detailLevelEntry.pack()
+maxColorsEntry = tk.Entry(root)
+tk.Label(root, text="Max Colors 1-17").pack()
+maxColorsEntry.insert(0, "4")
+maxColorsEntry.pack()
 #slowModeCheck = tk.Checkbutton(text="Slow Mode", variable=slowMode)
 #slowModeCheck.pack()
 statusLabel = tk.Label(text="Hello!")
 statusLabel.pack()
 LoadColorPositions()
 urlInput = tk.Entry(root)
-urlInput.pack()
 localFileButton = tk.Button(root, text="Open File", command=OpenFile)
 keyboard.add_hotkey("esc", Exit)
 root.mainloop()
